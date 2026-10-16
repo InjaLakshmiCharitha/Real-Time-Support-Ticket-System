@@ -1,0 +1,220 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Ticket Chat</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        input, textarea, button {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            margin: 6px 0;
+        }
+
+        button {
+            cursor: pointer;
+            background: #1769aa;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        #messages {
+            height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 12px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        #status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .internal {
+            color: #b45309;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Real-Time Ticket Chat</h1>
+
+    <label for="token">Access Token</label>
+    <input id="token" type="password"
+           placeholder="Paste your access token">
+
+    <label for="ticketId">Ticket ID</label>
+    <input id="ticketId" type="number"
+           placeholder="Enter ticket ID">
+
+    <button id="connectButton" onclick="connectChat()">
+        Connect to Chat
+    </button>
+
+    <div id="status">Status: Disconnected</div>
+
+    <div id="messages"></div>
+
+    <button onclick="clearMessages()">clear Messages</button> 
+
+    <textarea id="messageInput"
+              placeholder="Type your message..."
+              maxlength="5000"></textarea>
+
+    <label>
+        <input id="internalNote" type="checkbox"
+               style="width:auto">
+        Send as internal note (Agents/Admin only)
+    </label>
+
+    <button onclick="sendTyping()">I'm typing</button>
+    <button onclick="sendMessage()">Send Message</button>
+    <button onclick="disconnectChat()">Disconnect</button>
+
+    <script>
+        let socket = null;
+
+        const messagesBox = document.getElementById("messages");
+        const statusBox = document.getElementById("status");
+        const messageInput = document.getElementById("messageInput");
+
+        function showMessage(text, className = "") {
+            const item = document.createElement("div");
+            item.textContent = text;
+
+            if (className) {
+                item.className = className;
+            }
+
+            messagesBox.appendChild(item);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+        }
+
+        function connectChat() {
+            const token = document.getElementById("token").value.trim();
+            const ticketId = document.getElementById("ticketId").value.trim();
+
+            if (!token || !ticketId) {
+                alert("Enter both the access token and ticket ID.");
+                return;
+            }
+
+            disconnectChat();
+
+            const protocol =
+                window.location.protocol === "https:" ? "wss:" : "ws:";
+
+            const url =
+                `${protocol}//${window.location.host}` +
+                `/ws/tickets/${encodeURIComponent(ticketId)}` +
+                `?token=${encodeURIComponent(token)}`;
+
+            socket = new WebSocket(url);
+
+            socket.onopen = function () {
+                statusBox.textContent = "Status: Connected";
+                showMessage("Connected to ticket chat.");
+            };
+
+            socket.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+
+                if (data.type === "message") {
+                    const prefix = data.is_internal_note
+                        ? "[INTERNAL NOTE] "
+                        : "";
+
+                    showMessage(
+                        `${prefix}${data.sender_role}: ${data.message}`,
+                        data.is_internal_note ? "internal" : ""
+                    );
+                } else if (data.type === "typing") {
+                    if (data.is_typing && data.message) {
+                        showMessage(data.message);
+                    }
+                } else if (data.type === "error") {
+                    showMessage("Error: " + data.message);
+                } else if (data.type === "history") {
+                    showMessage("Previous messages received.");
+                }
+            };
+
+            socket.onerror = function () {
+                showMessage("WebSocket error. Check the server terminal.");
+            };
+
+            socket.onclose = function () {
+                statusBox.textContent = "Status: Disconnected";
+            };
+        }
+
+        function sendMessage() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("Connect to the chat first.");
+                return;
+            }
+
+            const message = messageInput.value.trim();
+
+            if (!message) {
+                alert("Enter a message first.");
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: "message",
+                message: message,
+                is_internal_note:
+                    document.getElementById("internalNote").checked
+            }));
+
+            messageInput.value = "";
+        }
+
+        function sendTyping() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("Connect to the chat first.");
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: "typing",
+                is_typing: true
+            }));
+        }
+
+        function clearMessages() {
+            document.getElementById("messages").innerHTML = "";
+        }
+
+        function disconnectChat() {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        }
+
+        window.addEventListener("beforeunload", disconnectChat);
+    </script>
+</body>
+</html>
